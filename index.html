@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EOSIO Table Explorer</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            color: #333;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #2c3e50;
+            margin-top: 0;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input, select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #2980b9;
+        }
+        .table-selector {
+            margin-top: 20px;
+            display: none;
+        }
+        .results {
+            margin-top: 20px;
+        }
+        .loading {
+            text-align: center;
+            padding: 20px;
+            font-style: italic;
+            color: #666;
+            display: none;
+        }
+        .error {
+            color: #e74c3c;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        table, th, td {
+            border: 1px solid #ddd;
+        }
+        th {
+            background-color: #f2f2f2;
+            padding: 10px;
+            text-align: left;
+        }
+        td {
+            padding: 8px;
+            vertical-align: top;
+            word-break: break-word;
+        }
+        .json-view {
+            white-space: pre-wrap;
+            font-family: monospace;
+            font-size: 13px;
+        }
+        .tab-content {
+            display: none;
+            margin-top: 20px;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        .tabs {
+            display: flex;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #ddd;
+        }
+        .tab {
+            padding: 10px 15px;
+            cursor: pointer;
+            margin-right: 5px;
+            border: 1px solid #ddd;
+            border-bottom: none;
+            border-radius: 4px 4px 0 0;
+            background-color: #f8f8f8;
+        }
+        .tab.active {
+            background-color: white;
+            border-bottom: 1px solid white;
+            margin-bottom: -1px;
+            font-weight: bold;
+        }
+        .scope-info {
+            margin-top: 10px;
+            font-style: italic;
+            color: #666;
+        }
+        pre {
+            background-color: #f8f8f8;
+            padding: 10px;
+            border-radius: 4px;
+            overflow: auto;
+        }
+        .status {
+            margin-top: 10px;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>EOSIO Table Explorer</h1>
+        
+        <div class="form-group">
+            <label for="server-url">Server URL</label>
+            <input type="text" id="server-url" value="https://fio.blockpane.com/v1/chain">
+        </div>
+        
+        <div class="form-group">
+            <label for="contract-name">Contract Name</label>
+            <input type="text" id="contract-name" value="Enter contract name">
+        </div>
+        
+        <button id="fetch-abi">Fetch Contract ABI</button>
+        <div id="error" class="error"></div>
+        
+        <div id="loading" class="loading">Loading...</div>
+        
+        <div id="table-selector" class="table-selector">
+            <div class="form-group">
+                <label for="table-select">Select Table</label>
+                <select id="table-select"></select>
+            </div>
+            <button id="fetch-data">Fetch Table Data</button>
+        </div>
+        
+        <div id="results" class="results">
+            <div class="tabs" id="tabs">
+                <div class="tab active" data-tab="data">Table Data</div>
+                <div class="tab" data-tab="raw">Raw JSON</div>
+                <div class="tab" data-tab="abi">Contract ABI</div>
+            </div>
+            
+            <div id="status" class="status"></div>
+            
+            <div id="data-tab" class="tab-content active">
+                <div id="scope-info" class="scope-info"></div>
+                <div id="table-container"></div>
+            </div>
+            
+            <div id="raw-tab" class="tab-content">
+                <pre id="raw-json"></pre>
+            </div>
+            
+            <div id="abi-tab" class="tab-content">
+                <pre id="abi-json"></pre>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Main state object
+        const state = {
+            serverUrl: '',
+            contractName: '',
+            abi: null,
+            tableData: [],
+            currentTable: '',
+            isLoading: false
+        };
+
+        // DOM elements
+        const elements = {
+            serverUrl: document.getElementById('server-url'),
+            contractName: document.getElementById('contract-name'),
+            fetchAbiBtn: document.getElementById('fetch-abi'),
+            tableSelector: document.getElementById('table-selector'),
+            tableSelect: document.getElementById('table-select'),
+            fetchDataBtn: document.getElementById('fetch-data'),
+            loading: document.getElementById('loading'),
+            error: document.getElementById('error'),
+            results: document.getElementById('results'),
+            tableContainer: document.getElementById('table-container'),
+            rawJson: document.getElementById('raw-json'),
+            abiJson: document.getElementById('abi-json'),
+            scopeInfo: document.getElementById('scope-info'),
+            status: document.getElementById('status'),
+            tabs: document.querySelectorAll('.tab'),
+            tabContents: document.querySelectorAll('.tab-content')
+        };
+
+        // Initialize the app
+        function init() {
+            // Set initial values from URL if present
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.has('url')) {
+                elements.serverUrl.value = urlParams.get('url');
+            }
+            if (urlParams.has('contract')) {
+                elements.contractName.value = urlParams.get('contract');
+            }
+
+            // Event listeners
+            elements.fetchAbiBtn.addEventListener('click', fetchAbi);
+            elements.fetchDataBtn.addEventListener('click', fetchTableData);
+            
+            // Tab handling
+            elements.tabs.forEach(tab => {
+                tab.addEventListener('click', () => {
+                    const tabId = tab.getAttribute('data-tab');
+                    activateTab(tabId);
+                });
+            });
+        }
+
+        // Switch between tabs
+        function activateTab(tabId) {
+            elements.tabs.forEach(tab => {
+                if (tab.getAttribute('data-tab') === tabId) {
+                    tab.classList.add('active');
+                } else {
+                    tab.classList.remove('active');
+                }
+            });
+            
+            elements.tabContents.forEach(content => {
+                if (content.id === tabId + '-tab') {
+                    content.classList.add('active');
+                } else {
+                    content.classList.remove('active');
+                }
+            });
+        }
+
+        // Fetch Contract ABI
+        async function fetchAbi() {
+            const serverUrl = elements.serverUrl.value.trim();
+            const contractName = elements.contractName.value.trim();
+            
+            if (!serverUrl || !contractName) {
+                showError('Please enter both server URL and contract name.');
+                return;
+            }
+            
+            state.serverUrl = serverUrl;
+            state.contractName = contractName;
+            
+            // Update URL without reloading
+            const url = new URL(window.location);
+            url.searchParams.set('url', serverUrl);
+            url.searchParams.set('contract', contractName);
+            window.history.pushState({}, '', url);
+            
+            setLoading(true);
+            showError('');
+            
+            try {
+                const response = await fetch(`${serverUrl}/get_abi`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ account_name: contractName })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                if (!data.abi) {
+                    throw new Error('No ABI found for this contract.');
+                }
+                
+                state.abi = data.abi;
+                
+                // Display ABI
+                elements.abiJson.textContent = JSON.stringify(data, null, 2);
+                
+                // Populate table dropdown
+                populateTableSelect(state.abi.tables);
+                
+                elements.tableSelector.style.display = 'block';
+            } catch (error) {
+                showError(`Failed to fetch ABI: ${error.message}`);
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        // Populate table select dropdown
+        function populateTableSelect(tables) {
+            elements.tableSelect.innerHTML = '';
+            
+            tables.forEach(table => {
+                const option = document.createElement('option');
+                option.value = table.name;
+                option.textContent = table.name;
+                elements.tableSelect.appendChild(option);
+            });
+        }
+
+        // Fetch table data across all scopes
+        async function fetchTableData() {
+            const tableName = elements.tableSelect.value;
+            
+            if (!tableName) {
+                showError('Please select a table.');
+                return;
+            }
+            
+            state.currentTable = tableName;
+            state.tableData = [];
+            
+            setLoading(true);
+            showError('');
+            elements.scopeInfo.textContent = '';
+            elements.status.textContent = 'Starting data fetch...';
+            
+            try {
+                // First, get all scopes for this table
+                const scopesResponse = await fetch(`${state.serverUrl}/get_table_by_scope`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        code: state.contractName,
+                        table: tableName,
+                        limit: 1000
+                    })
+                });
+                
+                if (!scopesResponse.ok) {
+                    throw new Error(`HTTP error! status: ${scopesResponse.status}`);
+                }
+                
+                const scopesData = await scopesResponse.json();
+                let scopes = scopesData.rows.map(row => row.scope);
+                
+                // If no scopes found, try with contract name as scope
+                if (scopes.length === 0) {
+                    scopes = [state.contractName];
+                }
+                
+                elements.status.textContent = `Found ${scopes.length} scopes. Fetching data...`;
+                elements.scopeInfo.textContent = `Table '${tableName}' has ${scopes.length} scopes.`;
+
+                // Fetch data for each scope with a limit
+                let allRows = [];
+                let completedScopes = 0;
+                
+                for (const scope of scopes) {
+                    try {
+                        const tableResponse = await fetch(`${state.serverUrl}/get_table_rows`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                code: state.contractName,
+                                scope: scope,
+                                table: tableName,
+                                limit: 500,
+                                json: true
+                            })
+                        });
+                        
+                        if (!tableResponse.ok) {
+                            console.error(`Error fetching scope ${scope}: ${tableResponse.statusText}`);
+                            continue;
+                        }
+                        
+                        const tableData = await tableResponse.json();
+                        
+                        // Add scope info to each row
+                        const scopeRows = tableData.rows.map(row => ({
+                            _scope: scope,
+                            ...row
+                        }));
+                        
+                        allRows = [...allRows, ...scopeRows];
+                        completedScopes++;
+                        
+                        elements.status.textContent = `Fetched ${completedScopes} of ${scopes.length} scopes. Total rows: ${allRows.length}`;
+                    } catch (error) {
+                        console.error(`Error processing scope ${scope}:`, error);
+                    }
+                }
+                
+                state.tableData = allRows;
+                
+                // Display the data
+                displayTableData(allRows);
+                elements.rawJson.textContent = JSON.stringify(allRows, null, 2);
+                
+                elements.status.textContent = `Completed. Showing ${allRows.length} rows across ${scopes.length} scopes.`;
+            } catch (error) {
+                showError(`Failed to fetch table data: ${error.message}`);
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        // Display table data
+        function displayTableData(rows) {
+            if (rows.length === 0) {
+                elements.tableContainer.innerHTML = '<p>No data found for this table.</p>';
+                return;
+            }
+            
+            // Get all possible columns from all rows
+            const allColumns = new Set();
+            rows.forEach(row => {
+                Object.keys(row).forEach(key => allColumns.add(key));
+            });
+            
+            // Create table
+            const table = document.createElement('table');
+            const thead = document.createElement('thead');
+            const tbody = document.createElement('tbody');
+            
+            // Add headers
+            const headerRow = document.createElement('tr');
+            allColumns.forEach(column => {
+                const th = document.createElement('th');
+                th.textContent = column;
+                headerRow.appendChild(th);
+            });
+            thead.appendChild(headerRow);
+            
+            // Add data rows
+            rows.forEach(row => {
+                const tr = document.createElement('tr');
+                
+                allColumns.forEach(column => {
+                    const td = document.createElement('td');
+                    
+                    if (row.hasOwnProperty(column)) {
+                        const value = row[column];
+                        
+                        if (typeof value === 'object' && value !== null) {
+                            // For objects, display as formatted JSON
+                            td.innerHTML = `<div class="json-view">${JSON.stringify(value, null, 2)}</div>`;
+                        } else {
+                            // For primitive values
+                            td.textContent = value;
+                        }
+                    } else {
+                        td.textContent = '';
+                    }
+                    
+                    tr.appendChild(td);
+                });
+                
+                tbody.appendChild(tr);
+            });
+            
+            table.appendChild(thead);
+            table.appendChild(tbody);
+            
+            // Clear and append the table
+            elements.tableContainer.innerHTML = '';
+            elements.tableContainer.appendChild(table);
+        }
+
+        // Helper function to show loading state
+        function setLoading(isLoading) {
+            state.isLoading = isLoading;
+            elements.loading.style.display = isLoading ? 'block' : 'none';
+            elements.fetchAbiBtn.disabled = isLoading;
+            elements.fetchDataBtn.disabled = isLoading;
+        }
+
+        // Helper function to show error messages
+        function showError(message) {
+            elements.error.textContent = message;
+        }
+
+        // Initialize the app when the DOM is loaded
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>
